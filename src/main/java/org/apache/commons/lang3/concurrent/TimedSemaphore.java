@@ -17,7 +17,6 @@
 
 package org.apache.commons.lang3.concurrent;
 
-import java.util.Queue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -124,7 +123,6 @@ public class TimedSemaphore {
         private long period;
         private TimeUnit timeUnit;
         private int limit;
-        private boolean fair;
 
         /**
          * Constructs a new Builder.
@@ -181,16 +179,6 @@ public class TimedSemaphore {
             this.timeUnit = timeUnit;
             return this;
         }
-        /**
-         * Sets whether to implement fairness.
-         *
-         * @param fair The time unit for the period.
-         * @return {@code this} instance.
-         */
-        public Builder setFairness(final boolean fair){
-            this.fair = fair;
-            return this;
-        }
     }
 
     /**
@@ -221,9 +209,6 @@ public class TimedSemaphore {
     /** The time unit for the period. */
     private final TimeUnit unit;
 
-    /** The flag whether to implement fairness. */
-    private final boolean fair;
-
     /** A flag whether the executor service was created by this object. */
     private final boolean ownExecutor;
 
@@ -250,14 +235,10 @@ public class TimedSemaphore {
     /** A flag whether shutdown() was called. */
     private boolean shutdown; // @GuardedBy("this")
 
-    /** A queue to implement FIFO order for the fair setting */
-    private Queue<Thread> queue = new java.util.ArrayDeque<>();
-
     private TimedSemaphore(final Builder builder) {
         Validate.inclusiveBetween(1, Long.MAX_VALUE, builder.period, "Time period must be greater than 0.");
         period = builder.period;
         unit = builder.timeUnit;
-        fair = builder.fair;
         if (builder.service != null) {
             executorService = builder.service;
             ownExecutor = false;
@@ -300,22 +281,7 @@ public class TimedSemaphore {
     public TimedSemaphore(final ScheduledExecutorService service, final long timePeriod, final TimeUnit timeUnit, final int limit) {
         this(builder().setService(service).setPeriod(timePeriod).setTimeUnit(timeUnit).setLimit(limit));
     }
-    /**
-     * Constructs a new instance of {@link TimedSemaphore} with an executor service
-     * which implements fairness and initializes it with the given time period and the limit.
-     *
-     * @param service    the executor service.
-     * @param timePeriod the time period.
-     * @param timeUnit   the unit for the period.
-     * @param limit      the limit for the semaphore.
-     * @param fair       the flag for the fairness setting.
-     * @throws IllegalArgumentException if the period is less or equals 0.
-     * @deprecated Use {@link #builder()} and {@link Builder}.
-     */
-    @Deprecated
-    public TimedSemaphore(final ScheduledExecutorService service, final long timePeriod, final TimeUnit timeUnit, final int limit, final boolean fair) {
-        this(builder().setService(service).setPeriod(timePeriod).setTimeUnit(timeUnit).setLimit(limit).setFairness(fair));
-    }
+
     /**
      * Acquires a permit from this semaphore. This method will block if the limit for the current period has already been reached. If {@link #shutdown()} has
      * already been invoked, calling this method will cause an exception. The very first call of this method starts the timer task which monitors the time
@@ -326,17 +292,6 @@ public class TimedSemaphore {
      */
     public synchronized void acquire() throws InterruptedException {
         prepareAcquire();
-
-        if(fair){
-            final Thread current = Thread.currentThread();
-            queue.add(current);
-            while(!canPassFair(current)){
-                wait();
-            }
-            queue.remove();
-            acquirePermit();
-            return;
-        }
         boolean canPass;
         do {
             canPass = acquirePermit();
@@ -345,16 +300,7 @@ public class TimedSemaphore {
             }
         } while (!canPass);
     }
-    /**
-     * Internal helper method for implementing fairness setting. This method uses {@link #acquirePermit()} method indicating whether a permit could be acquired
-     * and is at the top of the queue. This method must be called with the lock of this object held.
-     *
-     * @param current The current thread
-     * @return a flag whether the current thread is at the top of the queue and a permit could be acquired.
-     */
-    private boolean canPassFair(Thread current){
-        return queue.peek() == current && acquirePermit();
-    }
+
     /**
      * Internal helper method for acquiring a permit. This method checks whether currently a permit can be acquired and - if so - increases the internal
      * counter. The return value indicates whether a permit could be acquired. This method must be called with the lock of this object held.
@@ -460,15 +406,6 @@ public class TimedSemaphore {
     }
 
     /**
-     * Gets the flag whether to use the fairness setting
-     *
-     * @return fairness.
-     */
-    public boolean getFairness() {
-        return fair;
-    }
-
-    /**
      * Tests whether the {@link #shutdown()} method has been called on this object. If this method returns <strong>true</strong>, this instance cannot be used
      * any longer.
      *
@@ -531,8 +468,8 @@ public class TimedSemaphore {
     }
 
     /**
-     * Tries to acquire a permit from this semaphore, while respecting fairness. If the limit of this semaphore has not yet been reached,
-     * a permit is acquired, and this method returns * <strong>true</strong>. Otherwise, this method returns immediately with the result <strong>false</strong>.
+     * Tries to acquire a permit from this semaphore. If the limit of this semaphore has not yet been reached, a permit is acquired, and this method returns
+     * <strong>true</strong>. Otherwise, this method returns immediately with the result <strong>false</strong>.
      *
      * @return <strong>true</strong> if a permit could be acquired; <strong>false</strong> otherwise.
      * @throws IllegalStateException if this semaphore is already shut down.
@@ -540,11 +477,6 @@ public class TimedSemaphore {
      */
     public synchronized boolean tryAcquire() {
         prepareAcquire();
-        if(fair) {
-            if(!queue.isEmpty()){
-                return false;
-            }
-        }
         return acquirePermit();
     }
 }
