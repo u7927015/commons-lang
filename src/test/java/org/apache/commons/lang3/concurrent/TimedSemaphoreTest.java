@@ -110,6 +110,10 @@ class TimedSemaphoreTest extends AbstractLangTest {
             super(service, timePeriod, timeUnit, limit);
         }
 
+        TimedSemaphoreTestImpl(final ScheduledExecutorService service, final long timePeriod, final TimeUnit timeUnit, final int limit, final boolean fair) {
+            super(service, timePeriod, timeUnit, limit, fair);
+        }
+
         /**
          * Invokes the latch if one is set.
          *
